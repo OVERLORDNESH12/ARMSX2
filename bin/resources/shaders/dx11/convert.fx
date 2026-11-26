@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
+// SPDX-FileCopyrightText: 2002-2025 PCSX2 Dev Team
 // SPDX-License-Identifier: GPL-3.0+
 
 #if defined(VERTEX_SHADER)
@@ -169,11 +169,6 @@ float depth32_to_depth24(float d)
 	return uint_to_depth24(depth_to_uint(d));
 }
 
-float4 primid_to_rgba8(float p)
-{
-	return uint_to_rgba8(asuint(p));
-}
-
 #if defined(__ps_copy__)
 OUTPUT_TYPE ps_copy(PS_INPUT input) : OUTPUT_SV
 {
@@ -196,6 +191,7 @@ PS_OUTPUT ps_downsample_copy(PS_INPUT input)
 	float Weight = BGColor.x;
 	float step_multiplier = BGColor.y;
 
+	const int step = int(step_multiplier);
 	int2 coord = max(int2(input.p.xy) * DownsampleFactor, ClampMin);
 
 	PS_OUTPUT output;
@@ -203,7 +199,7 @@ PS_OUTPUT ps_downsample_copy(PS_INPUT input)
 	for (int yoff = 0; yoff < DownsampleFactor; yoff++)
 	{
 		for (int xoff = 0; xoff < DownsampleFactor; xoff++)
-			output.o += Texture.Load(int3(coord + int2(xoff * step_multiplier, yoff * step_multiplier), 0));
+			output.c += Texture.Load(int3(coord + int2(xoff * step, yoff * step), 0));
 	}
 	output.o /= Weight;
 	return output;
@@ -328,13 +324,6 @@ OUTPUT_TYPE ps_convert_depth32_depth24(PS_INPUT input) : OUTPUT_SV
 }
 #endif
 
-#if defined(__ps_convert_primid_rgba8__)
-OUTPUT_TYPE ps_convert_primid_rgba8(PS_INPUT input) : OUTPUT_SV
-{
-	return primid_to_rgba8(sample_c(input.t));
-}
-#endif
-
 #define SAMPLE_RGBA_DEPTH_BILN(CONVERT_FN) \
 	uint width, height; \
 	Texture.GetDimensions(width, height); \
@@ -346,7 +335,7 @@ OUTPUT_TYPE ps_convert_primid_rgba8(PS_INPUT input) : OUTPUT_SV
 	float depthTR = CONVERT_FN(Texture.Load(int3(coords.zy, 0))); \
 	float depthBL = CONVERT_FN(Texture.Load(int3(coords.xw, 0))); \
 	float depthBR = CONVERT_FN(Texture.Load(int3(coords.zw, 0))); \
-	return floor(lerp(lerp(depthTL, depthTR, mix_vals.x), lerp(depthBL, depthBR, mix_vals.x), mix_vals.y) * exp2(32.0f)) * exp2(-32.0f); 
+	return lerp(lerp(depthTL, depthTR, mix_vals.x), lerp(depthBL, depthBR, mix_vals.x), mix_vals.y);
 
 #if defined(__ps_convert_rgba8_depth32__)
 OUTPUT_TYPE ps_convert_rgba8_depth32(PS_INPUT input) : OUTPUT_SV
@@ -415,64 +404,64 @@ PS_OUTPUT ps_convert_rgb5a1_8i(PS_INPUT input)
 	uint2 pos = uint2(input.p.xy);
 
 	// Collapse separate R G B A areas into their base pixel
-	uint2 column = (pos & ~uint2(0u, 3u)) / uint2(1u, 2u);
+	uint2 column = (pos & ~uint2(0u, 3u)) / uint2(1,2);
 	uint2 subcolumn = (pos & uint2(0u, 1u));
-	column.x -= (column.x / 128u) * 64u;
-	column.y += (column.y / 32u) * 32u;
+	column.x -= (column.x / 128) * 64;
+	column.y += (column.y / 32) * 32;
 	
 	uint PSM = uint(DOFFSET);
 	
 	// Deal with swizzling differences
-	if ((PSM & 0x8u) != 0u) // PSMCT16S
+	if ((PSM & 0x8) != 0) // PSMCT16S
 	{
-		if ((pos.x & 32u) != 0u)
+		if ((pos.x & 32) != 0)
 		{
-			column.y += 32u; // 4 columns high times 4 to get bottom 4 blocks
-			column.x &= ~32u;
+			column.y += 32; // 4 columns high times 4 to get bottom 4 blocks
+			column.x &= ~32;
 		}
 		
-		if ((pos.x & 64u) != 0u)
+		if ((pos.x & 64) != 0)
 		{
-			column.x -= 32u;
+			column.x -= 32;
 		}
 		
-		if (((pos.x & 16u) != 0u) != ((pos.y & 16u) != 0u))
+		if (((pos.x & 16) != 0) != ((pos.y & 16) != 0))
 		{
-			column.x ^= 16u; 
-			column.y ^= 8u;
+			column.x ^= 16; 
+			column.y ^= 8;
 		}
 		
-		if ((PSM & 0x30u) != 0u) // PSMZ16S - Untested but hopefully ok if anything uses it.
+		if ((PSM & 0x30) != 0) // PSMZ16S - Untested but hopefully ok if anything uses it.
 		{
-			column.x ^= 32u;
-			column.y ^= 16u;
+			column.x ^= 32;
+			column.y ^= 16;
 		}
 	}
 	else // PSMCT16
 	{
-		if ((pos.y & 32u) != 0u)
+		if ((pos.y & 32) != 0)
 		{
-			column.y -= 16u;
-			column.x += 32u;
+			column.y -= 16;
+			column.x += 32;
 		}
 		
-		if ((pos.x & 96u) != 0u)
+		if ((pos.x & 96) != 0)
 		{
-			uint multi = (pos.x & 96u) / 32u;
-			column.y += 16u * multi; // 4 columns high times 4 to get bottom 4 blocks
-			column.x -= (pos.x & 96u);
+			uint multi = (pos.x & 96) / 32;
+			column.y += 16 * multi; // 4 columns high times 4 to get bottom 4 blocks
+			column.x -= (pos.x & 96);
 		}
 		
-		if (((pos.x & 16u) != 0u) != ((pos.y & 16) != 0))
+		if (((pos.x & 16) != 0) != ((pos.y & 16) != 0))
 		{
-			column.x ^= 16u; 
-			column.y ^= 8u;
+			column.x ^= 16; 
+			column.y ^= 8;
 		}
 		
-		if ((PSM & 0x30u) != 0u) // PSMZ16 - Untested but hopefully ok if anything uses it.
+		if ((PSM & 0x30) != 0) // PSMZ16 - Untested but hopefully ok if anything uses it.
 		{
-			column.x ^= 32u;
-			column.y ^= 32u;
+			column.x ^= 32;
+			column.y ^= 32;
 		}
 	}
 	
@@ -481,10 +470,10 @@ PS_OUTPUT ps_convert_rgb5a1_8i(PS_INPUT input)
 	// Compensate for potentially differing page pitch.
 	uint SBW = uint(EMODA);
 	uint DBW = uint(EMODC);
-	uint2 block_xy = coord / uint2(64u, 64u);
-	uint block_num = (block_xy.y * (DBW / 128u)) + block_xy.x;
-	uint2 block_offset = uint2((block_num % (SBW / 64u)) * 64u, (block_num / (SBW / 64u)) * 64u);
-	coord = (coord % uint2(64u, 64u)) + block_offset;
+	uint2 block_xy = coord / uint2(64,64);
+	uint block_num = (block_xy.y * (DBW / 128)) + block_xy.x;
+	uint2 block_offset = uint2((block_num % (SBW / 64)) * 64, (block_num / (SBW / 64)) * 64);
+	coord = (coord % uint2(64, 64)) + block_offset;
 
 	// Apply offset to cols 1 and 2
 	uint is_col23 = pos.y & 4u;
@@ -504,16 +493,18 @@ PS_OUTPUT ps_convert_rgb5a1_8i(PS_INPUT input)
 	{
 		uint red = (denorm_c.r >> 3) & 0x1Fu;
 		uint green = (denorm_c.g >> 3) & 0x1Fu;
+		float sel0 = (float)(((green << 5) | red) & 0xFF) / 255.0f;
 		
-		output.o = (float4)(((float)(((green << 5) | red) & 0xFFu)) / 255.0f);
+		output.c = (float4)(sel0);
 	}
 	else
 	{
 		uint green = (denorm_c.g >> 3) & 0x1Fu;
 		uint blue = (denorm_c.b >> 3) & 0x1Fu;
 		uint alpha = denorm_c.a & 0x80u;
+		float sel0 = (float)((alpha | (blue << 2) | (green >> 3)) & 0xFF) / 255.0f;
 
-		output.o = (float4)(((float)((alpha | (blue << 2) | (green >> 3)) & 0xFFu)) / 255.0f);
+		output.c = (float4)(sel0);
 	}
 	return output;
 }
@@ -662,9 +653,9 @@ float ps_primid_image_init_0(PS_INPUT input) : SV_Target
 {
 	float c;
 	if ((127.5f / 255.0f) < sample_c(input.t).a) // < 0x80 pass (== 0x80 should not pass)
-		c = float(PRIMID_MIN);
+		c = float(-1);
 	else
-		c = float(PRIMID_MAX);
+		c = float(0x7FFFFFFF);
 	return c;
 }
 #endif
@@ -674,9 +665,9 @@ float ps_primid_image_init_1(PS_INPUT input) : SV_Target
 {
 	float c;
 	if (sample_c(input.t).a < (127.5f / 255.0f)) // >= 0x80 pass
-		c = float(PRIMID_MIN);
+		c = float(-1);
 	else
-		c = float(PRIMID_MAX);
+		c = float(0x7FFFFFFF);
 	return c;
 }
 #endif
@@ -686,9 +677,9 @@ float ps_primid_image_init_2(PS_INPUT input) : SV_Target
 {
 	float c;
 	if ((254.5f / 255.0f) < sample_c(input.t).a) // < 0x80 pass (== 0x80 should not pass)
-		c = float(PRIMID_MIN);
+		c = float(-1);
 	else
-		c = float(PRIMID_MAX);
+		c = float(0x7FFFFFFF);
 	return c;
 }
 #endif
@@ -698,9 +689,9 @@ float ps_primid_image_init_3(PS_INPUT input) : SV_Target
 {
 	float c;
 	if (sample_c(input.t).a < (254.5f / 255.0f)) // >= 0x80 pass
-		c = float(PRIMID_MIN);
+		c = float(-1);
 	else
-		c = float(PRIMID_MAX);
+		c = float(0x7FFFFFFF);
 	return c;
 }
 #endif
